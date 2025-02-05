@@ -2,7 +2,7 @@ import io
 import socket
 import struct
 import time
-import os  # For running TTS commands
+import os  # For running TTS commands and file deletion
 import RPi.GPIO as GPIO
 from picamera2 import Picamera2
 
@@ -31,6 +31,7 @@ def button_callback(channel):
     global current_mode
     if current_mode == "MODE-I":
         current_mode = "MODE-II"
+        delete_captured_image()  # Delete captured image when switching to Mode-II
     else:
         current_mode = "MODE-I"
     print(f"Mode changed to: {current_mode}")
@@ -38,17 +39,28 @@ def button_callback(channel):
 
 GPIO.add_event_detect(button_pin, GPIO.FALLING, callback=button_callback, bouncetime=300)
 
+def delete_captured_image():
+    """ Delete the captured image if it exists """
+    image_path = "/home/focus/temp_image.jpg"
+    if os.path.exists(image_path):
+        os.remove(image_path)
+        print(f"Deleted captured image: {image_path}")
+
 def receive_wav():
-    """ Receive a .wav file from the server and save it. """
+    """ Receive a .wav file from the server, save it, and play it. """
     wav_size = struct.unpack('<L', client_socket.recv(4))[0]
     if wav_size == 0:
         print("No WAV file received")
         return
 
     wav_data = client_socket.recv(wav_size)
-    with open("output.wav", "wb") as f:
+    wav_file_path = "/home/focus/output.wav"
+    with open(wav_file_path, "wb") as f:
         f.write(wav_data)
     print("Received and saved output.wav")
+
+    # Play the received .wav file using aplay
+    os.system(f"aplay {wav_file_path}")
 
 try:
     picam2 = Picamera2()
@@ -64,6 +76,11 @@ try:
             # Capture a single image and send it
             print("Capturing a single image...")
             picam2.capture_file(stream, format='jpeg')
+
+            # Save the captured image
+            image_path = "/home/focus/temp_image.jpg"
+            with open(image_path, "wb") as f:
+                f.write(stream.getvalue())
 
             # Send mode information
             connection.write(current_mode.encode('utf-8'))
@@ -117,3 +134,4 @@ finally:
     connection.close()
     client_socket.close()
     GPIO.cleanup()
+

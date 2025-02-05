@@ -70,23 +70,31 @@ def main():
         
         #saved_embeddings = load_embeddings()
 
+        while True:
+        conn, addr = server_socket.accept()
+        print(f"Connected by {addr}")
+        
         try:
             while True:
-                # Receive mode
-                mode_bytes = conn.recv(6)  # MODE-I or MODE-II
+                # Receive mode (6 bytes for MODE-I)
+                mode_bytes = conn.recv(6)
                 if not mode_bytes:
                     break
                 mode = mode_bytes.decode('utf-8')
+                print(f"Received mode: {mode}")
 
-                # Receive image size
-                size_data = conn.recv(4)
-                if not size_data:
+                # Receive image size (4 bytes)
+                size_bytes = conn.recv(4)
+                if len(size_bytes) != 4:
+                    print(f"Incomplete size received: {len(size_bytes)} bytes")
                     break
-                image_size = struct.unpack('<L', size_data)[0]
+                    
+                image_size = struct.unpack('<L', size_bytes)[0]
+                print(f"Image size: {image_size}")
                 
-                # Termination check
                 if image_size == 0:
                     break
+
 
                 # Receive image data
                 image_data = b""

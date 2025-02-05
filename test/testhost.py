@@ -12,7 +12,7 @@ GPIO.setmode(GPIO.BCM)
 GPIO.setup(button_pin, GPIO.IN, pull_up_down=GPIO.PUD_UP)
 
 # Server Configuration
-server_ip = '192.68.157.52'
+server_ip = '192.168.157.52'
 server_port = 8000
 client_socket = socket.socket()
 client_socket.connect((server_ip, server_port))
@@ -28,9 +28,8 @@ def announce_mode(mode):
 
 def button_callback(channel):
     global current_mode
-    # Commented out Mode-II switching
-    # current_mode = "MODE-II" if current_mode == "MODE-I" else "MODE-I"
-    print(f"Mode: {current_mode}")
+    current_mode = "MODE-II" if current_mode == "MODE-I" else "MODE-I"
+    print(f"Mode changed to: {current_mode}")
     announce_mode(current_mode)
     delete_captured_image()
 
@@ -68,32 +67,56 @@ def main():
     
     try:
         while True:
-            # Removed Mode-II block
-            # Single image mode only
-            print("Capturing a single image...")
-            picam2.capture_file(stream, format='jpeg')
+            if current_mode == "MODE-I":
+                # Capture a single image
+                print("Capturing a single image...")
+                picam2.capture_file(stream, format='jpeg')
 
-            # Save the captured image
-            image_path = "/home/focus/temp_image.jpg"
-            with open(image_path, "wb") as f:
-                f.write(stream.getvalue())
+                # Save the captured image
+                image_path = "/home/focus/temp_image.jpg"
+                with open(image_path, "wb") as f:
+                    f.write(stream.getvalue())
 
-            # Send mode
-            client_socket.send(current_mode.encode('utf-8'))
+                # Send mode
+                client_socket.send(current_mode.encode('utf-8'))
 
-            # Send image size and data
-            image_size = stream.tell()
-            client_socket.send(struct.pack('<L', image_size))
-            stream.seek(0)
-            client_socket.send(stream.read())
+                # Send image size and data
+                image_size = stream.tell()
+                client_socket.send(struct.pack('<L', image_size))
+                stream.seek(0)
+                client_socket.send(stream.read())
 
-            # Clear the stream
-            stream.seek(0)
-            stream.truncate()
+                # Clear the stream
+                stream.seek(0)
+                stream.truncate()
 
-            # Receive WAV response
-            receive_wav()
-            time.sleep(2)
+                # Receive WAV response
+                receive_wav()
+                time.sleep(2)
+
+            elif current_mode == "MODE-II":
+                """
+                # Video streaming mode
+                print("Streaming video frames...")
+                for _ in range(10):  # Limit for testing
+                    picam2.capture_file(stream, format='jpeg')
+
+                    # Send mode
+                    client_socket.send(current_mode.encode('utf-8'))
+
+                    # Send image size and data
+                    image_size = stream.tell()
+                    client_socket.send(struct.pack('<L', image_size))
+                    stream.seek(0)
+                    client_socket.send(stream.read())
+
+                    # Clear the stream
+                    stream.seek(0)
+                    stream.truncate()
+
+                    # Receive WAV response
+                    receive_wav()
+                    time.sleep(0.5)  # Adjust frame rate"""
 
     except KeyboardInterrupt:
         print("Stopping...")

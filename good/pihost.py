@@ -14,9 +14,6 @@ GPIO.setup(button_pin, GPIO.IN, pull_up_down=GPIO.PUD_UP)
 # Server Configuration
 server_ip = '192.168.157.52'  # Replace with your server's actual IP
 server_port = 8000
-client_socket = socket.socket()
-client_socket.connect((server_ip, server_port))
-connection = client_socket.makefile('wb')
 
 # Mode Management
 current_mode = "CAPTURE"  # Default mode
@@ -30,13 +27,23 @@ output_dir = "/home/pizero/ProjectOutput/"
 os.makedirs(image_dir, exist_ok=True)
 os.makedirs(output_dir, exist_ok=True)
 
-def button_callback(channel):
+# Initialize Picamera2
+picam2 = Picamera2()
+config = picam2.create_still_configuration(main={"size": (640, 480)})
+picam2.configure(config)
+picam2.start()
+time.sleep(2)  # Allow camera to warm up
+
+def toggle_mode(channel):
     """Toggle between CAPTURE and DESCRIBE modes"""
     global current_mode
     current_mode = "DESCRIBE" if current_mode == "CAPTURE" else "CAPTURE"
     print(f"Mode changed to: {current_mode}")
 
-GPIO.add_event_detect(button_pin, GPIO.FALLING, callback=button_callback, bouncetime=300)
+    if current_mode == "CAPTURE":
+        capture_and_send_image()
+
+GPIO.add_event_detect(button_pin, GPIO.FALLING, callback=toggle_mode, bouncetime=300)
 
 def receive_mp3():
     """Receive, save, and play the .mp3 file from the server"""
@@ -71,14 +78,15 @@ def receive_mp3():
     except Exception as e:
         print(f"Error receiving MP3 file: {e}")
 
-try:
-    picam2 = Picamera2()
-    config = picam2.create_still_configuration(main={"size": (640, 480)})
-    picam2.configure(config)
-    picam2.start()
-    time.sleep(2)  # Allow camera to warm up
+def capture_and_send_image():
+    """Capture an image and send it to the server"""
+    global client_socket, connection
+    
+    try:
+        client_socket = socket.socket()
+        client_socket.connect((server_ip, server_port))
+        connection = client_socket.makefile('wb')
 
-    while True:
         # Generate unique filename for each image
         timestamp = time.strftime("%Y%m%d-%H%M%S")
         image_path = os.path.join(image_dir, f"{current_mode}_{timestamp}.jpg")
@@ -107,8 +115,18 @@ try:
         # Receive and play the MP3 response
         receive_mp3()
 
+    except Exception as e:
+        print(f"Error in capturing/sending image: {e}")
+
+    finally:
+        connection.write(struct.pack('<L', 0))  # Send termination signal
+        connection.close()
+        client_socket.close()
+
+try:
+    print("Waiting for button press to capture an image...")
+    while True:
+        time.sleep(0.1)  # Keep the script running
+
 finally:
-    connection.write(struct.pack('<L', 0))  # Send termination signal
-    connection.close()
-    client_socket.close()
     GPIO.cleanup()

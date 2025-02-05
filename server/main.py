@@ -10,9 +10,6 @@ from PIL import Image
 from facenet_pytorch import MTCNN, InceptionResnetV1
 from scipy.spatial.distance import cosine  # For comparing embeddings
 
-# Initialize components
-init_asl()
-detector = ObjectDetector()
 
 # FaceNet setup
 mtcnn = MTCNN()

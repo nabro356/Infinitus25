@@ -6,50 +6,54 @@ import pytesseract
 import pyttsx3
 import json
 from PIL import Image
-# Commented out Mode-II related imports
-# from facenet_pytorch import MTCNN, InceptionResnetV1
-# from scipy.spatial.distance import cosine
+#from facenet_pytorch import MTCNN, InceptionResnetV1
+#from scipy.spatial.distance import cosine
 
-# Commented out FaceNet setup
-# mtcnn = MTCNN()
-# model = InceptionResnetV1(pretrained='vggface2').eval()
+# FaceNet setup
+#mtcnn = MTCNN()
+#model = InceptionResnetV1(pretrained='vggface2').eval()
 
 # TTS engine
 engine = pyttsx3.init()
 
+# Load saved face embeddings
+"""
 def load_embeddings(file="objects.json"):
     try:
         with open(file, "r") as f:
             return json.load(f)
     except FileNotFoundError:
-        return {}
+        return {}"""
 
+# Function to convert text to speech
 def text_to_speech(text, filename="/home/focus/output.wav"):
     engine.save_to_file(text, filename)
     engine.runAndWait()
 
+# Function for OCR on image
 def apply_ocr(image_path):
     img = Image.open(image_path)
     return pytesseract.image_to_string(img)
+"""
+# Function for face recognition
+def recognize_faces(frame, saved_embeddings):
+    faces = mtcnn.detect(frame)
+    face_names = []
+    for face in faces[0]:
+        aligned_face = mtcnn.align(frame, face)
+        embedding = model(aligned_face.unsqueeze(0)).detach().numpy().flatten()
 
-# Commented out face recognition function
-# def recognize_faces(frame, saved_embeddings):
-#     faces = mtcnn.detect(frame)
-#     face_names = []
-#     for face in faces[0]:
-#         aligned_face = mtcnn.align(frame, face)
-#         embedding = model(aligned_face.unsqueeze(0)).detach().numpy().flatten()
-# 
-#         best_match_name = "Unknown"
-#         best_match_distance = float("inf")
-#         for name, saved_embedding in saved_embeddings.items():
-#             distance = cosine(embedding, saved_embedding)
-#             if distance < best_match_distance:
-#                 best_match_name = name
-#                 best_match_distance = distance
-#         
-#         face_names.append(f"{best_match_name} is in front of you.")
-#     return face_names
+        best_match_name = "Unknown"
+        best_match_distance = float("inf")
+        for name, saved_embedding in saved_embeddings.items():
+            distance = cosine(embedding, saved_embedding)
+            if distance < best_match_distance:
+                best_match_name = name
+                best_match_distance = distance
+        
+        face_names.append(f"{best_match_name} is in front of you.")
+    return face_names
+"""
 
 def main():
     # Setup
@@ -114,10 +118,11 @@ def main():
                             conn.sendall(struct.pack('<L', len(wav_data)))
                             conn.sendall(wav_data)
                     
-                    # Commented out Mode-II functionality
-                    # elif mode == "MODE-II":
-                    #     # Future implementation for continuous video processing
-                    #     pass
+                    elif mode == "MODE-II":
+                        # Future implementation for continuous video processing
+                        # This could include more advanced scene recognition, 
+                        # face detection, etc.
+                        pass
 
         except Exception as e:
             print(f"Error processing connection: {e}")

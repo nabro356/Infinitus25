@@ -1,0 +1,9 @@
+socket
+opencv-python
+numpy
+struct
+pytesseract
+pyttsx3
+Pillow
+facenet-pytorch
+scipy

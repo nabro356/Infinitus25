@@ -16,8 +16,8 @@ server_ip = '192.168.157.52'  # Replace with your server's actual IP
 server_port = 8000
 
 # Mode Management
-current_mode = "CAPTURE"  # Default mode
-mode_names = ["CAPTURE", "DESCRIBE"]
+modes = ["CAPTURE", "DESCRIBE"]  # Mode-I and Mode-II
+current_mode_index = 0  # Start in Mode-I (CAPTURE)
 
 # Directories for saving images & output files
 image_dir = "/home/pizero/ProjectImages/"
@@ -36,12 +36,14 @@ time.sleep(2)  # Allow camera to warm up
 
 def toggle_mode(channel):
     """Toggle between CAPTURE and DESCRIBE modes"""
-    global current_mode
-    current_mode = "DESCRIBE" if current_mode == "CAPTURE" else "CAPTURE"
+    global current_mode_index
+    current_mode_index = (current_mode_index + 1) % 2  # 0 -> 1 -> 0 (CAPTURE -> DESCRIBE -> CAPTURE)
+
+    current_mode = modes[current_mode_index]
     print(f"Mode changed to: {current_mode}")
 
     if current_mode == "CAPTURE":
-        capture_and_send_image()
+        capture_and_send_image(current_mode)  # Capture image only in CAPTURE mode
 
 GPIO.add_event_detect(button_pin, GPIO.FALLING, callback=toggle_mode, bouncetime=300)
 
@@ -78,7 +80,7 @@ def receive_mp3():
     except Exception as e:
         print(f"Error receiving MP3 file: {e}")
 
-def capture_and_send_image():
+def capture_and_send_image(mode):
     """Capture an image and send it to the server"""
     global client_socket, connection
     
@@ -89,7 +91,7 @@ def capture_and_send_image():
 
         # Generate unique filename for each image
         timestamp = time.strftime("%Y%m%d-%H%M%S")
-        image_path = os.path.join(image_dir, f"{current_mode}_{timestamp}.jpg")
+        image_path = os.path.join(image_dir, f"{mode}_{timestamp}.jpg")
 
         # Capture image and save locally
         picam2.capture_file(image_path)
@@ -100,7 +102,7 @@ def capture_and_send_image():
             image_data = f.read()
 
         # Send mode information (Ensure it's always 7 bytes for consistency)
-        mode_bytes = current_mode.ljust(7).encode('utf-8')  # Ensure it is always 7 bytes
+        mode_bytes = mode.ljust(7).encode('utf-8')  # Ensure it is always 7 bytes
         connection.write(mode_bytes)
         connection.flush()
 
@@ -124,7 +126,7 @@ def capture_and_send_image():
         client_socket.close()
 
 try:
-    print("Waiting for button press to capture an image...")
+    print("Waiting for button press...")
     while True:
         time.sleep(0.1)  # Keep the script running
 

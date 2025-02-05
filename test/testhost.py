@@ -12,7 +12,7 @@ GPIO.setmode(GPIO.BCM)
 GPIO.setup(button_pin, GPIO.IN, pull_up_down=GPIO.PUD_UP)
 
 # Server Configuration
-server_ip = '192.168.157.52'  # Replace with your server IP
+server_ip = '192.168.157.52'  # Replace with your server's actual IP
 server_port = 8000
 client_socket = socket.socket()
 client_socket.connect((server_ip, server_port))
@@ -40,22 +40,33 @@ GPIO.add_event_detect(button_pin, GPIO.FALLING, callback=button_callback, bounce
 
 def receive_wav():
     """Receive and save the .wav file from the server"""
-    wav_size = struct.unpack('<L', client_socket.recv(4))[0]
-    if wav_size == 0:
-        print("No WAV file received")
-        return
-    
-    wav_path = os.path.join(output_dir, "output.wav")
-    with open(wav_path, "wb") as f:
-        remaining_size = wav_size
-        while remaining_size > 0:
-            data = client_socket.recv(min(1024, remaining_size))
-            if not data:
-                break
-            f.write(data)
-            remaining_size -= len(data)
+    try:
+        size_data = client_socket.recv(4)
+        
+        if not size_data or len(size_data) < 4:
+            print("No valid WAV file size received.")
+            return
+        
+        wav_size = struct.unpack('<L', size_data)[0]
+        
+        if wav_size == 0:
+            print("No WAV file received")
+            return
+        
+        wav_path = os.path.join(output_dir, "output.wav")
+        with open(wav_path, "wb") as f:
+            remaining_size = wav_size
+            while remaining_size > 0:
+                data = client_socket.recv(min(1024, remaining_size))
+                if not data:
+                    break
+                f.write(data)
+                remaining_size -= len(data)
 
-    print(f"WAV file saved: {wav_path}")
+        print(f"WAV file saved: {wav_path}")
+
+    except Exception as e:
+        print(f"Error receiving WAV file: {e}")
 
 try:
     picam2 = Picamera2()
@@ -77,8 +88,9 @@ try:
         with open(image_path, "rb") as f:
             image_data = f.read()
 
-        # Send mode information
-        connection.write(current_mode.encode('utf-8'))
+        # Send mode information (Ensure it's always 7 bytes for consistency)
+        mode_bytes = current_mode.ljust(7).encode('utf-8')  # Ensure it is always 7 bytes
+        connection.write(mode_bytes)
         connection.flush()
 
         # Send image size

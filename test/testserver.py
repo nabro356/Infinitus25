@@ -4,138 +4,115 @@ import numpy as np
 import struct
 import pytesseract
 import pyttsx3
-import json
+import os
 from PIL import Image
-#from facenet_pytorch import MTCNN, InceptionResnetV1
-#from scipy.spatial.distance import cosine
+import io
 
-# FaceNet setup
-#mtcnn = MTCNN()
-#model = InceptionResnetV1(pretrained='vggface2').eval()
+# Server Configuration
+HOST = '192.168.157.52'  # Listen on all available network interfaces
+PORT = 8000
 
-# TTS engine
+# Directories for storing results
+output_text_dir = "./TextOutputs/"
+output_audio_dir = "./AudioOutputs/"
+
+# Ensure directories exist
+os.makedirs(output_text_dir, exist_ok=True)
+os.makedirs(output_audio_dir, exist_ok=True)
+
+# Initialize TTS engine
 engine = pyttsx3.init()
 
-# Load saved face embeddings
-"""
-def load_embeddings(file="objects.json"):
-    try:
-        with open(file, "r") as f:
-            return json.load(f)
-    except FileNotFoundError:
-        return {}"""
-
-# Function to convert text to speech
-def text_to_speech(text, filename="/home/focus/output.wav"):
+def text_to_speech(text, filename):
+    """Convert text to speech and save as a .wav file"""
     engine.save_to_file(text, filename)
     engine.runAndWait()
 
-# Function for OCR on image
 def apply_ocr(image_path):
+    """Perform OCR on an image and return the extracted text"""
     img = Image.open(image_path)
-    return pytesseract.image_to_string(img)
-"""
-# Function for face recognition
-def recognize_faces(frame, saved_embeddings):
-    faces = mtcnn.detect(frame)
-    face_names = []
-    for face in faces[0]:
-        aligned_face = mtcnn.align(frame, face)
-        embedding = model(aligned_face.unsqueeze(0)).detach().numpy().flatten()
+    text = pytesseract.image_to_string(img)
+    return text.strip()  # Remove extra spaces and newlines
 
-        best_match_name = "Unknown"
-        best_match_distance = float("inf")
-        for name, saved_embedding in saved_embeddings.items():
-            distance = cosine(embedding, saved_embedding)
-            if distance < best_match_distance:
-                best_match_name = name
-                best_match_distance = distance
-        
-        face_names.append(f"{best_match_name} is in front of you.")
-    return face_names
-"""
+def receive_image(conn):
+    """Receive an image from the Raspberry Pi and save it"""
+    # Receive image size
+    image_size_data = conn.recv(4)
+    if not image_size_data:
+        return None
+    image_size = struct.unpack('<L', image_size_data)[0]
 
-def main():
-    # Setup
-    HOST = '192.168.157.52'
-    PORT = 8000
-    server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    server_socket.bind((HOST, PORT))
-    server_socket.listen(1)
-    print(f"Listening on port {PORT}...")
+    # Receive image data
+    image_data = b""
+    while len(image_data) < image_size:
+        packet = conn.recv(image_size - len(image_data))
+        if not packet:
+            return None
+        image_data += packet
 
-    while True:
-        conn, addr = server_socket.accept()
-        print(f"Connected by {addr}")
-        
-        #saved_embeddings = load_embeddings()
+    # Convert received bytes to an image
+    image_np = np.frombuffer(image_data, dtype=np.uint8)
+    frame = cv2.imdecode(image_np, cv2.IMREAD_COLOR)
+    return frame
 
+# Start server
+server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+server_socket.bind((HOST, PORT))
+server_socket.listen(1)
+print(f"Listening on port {PORT}...")
+
+while True:
+    conn, addr = server_socket.accept()
+    print(f"Connected by {addr}")
+
+    try:
         while True:
-        conn, addr = server_socket.accept()
-        print(f"Connected by {addr}")
-        
-        try:
-            while True:
-                # Receive mode (6 bytes for MODE-I)
-                mode_bytes = conn.recv(6)
-                if not mode_bytes:
-                    break
-                mode = mode_bytes.decode('utf-8')
-                print(f"Received mode: {mode}")
+            # Receive mode information (CAPTURE or DESCRIBE)
+            mode_data = conn.recv(7).decode('utf-8')  # "CAPTURE" or "DESCRIBE"
+            if not mode_data:
+                break
+            
+            print(f"Mode received: {mode_data}")
 
-                # Receive image size (4 bytes)
-                size_bytes = conn.recv(4)
-                if len(size_bytes) != 4:
-                    print(f"Incomplete size received: {len(size_bytes)} bytes")
-                    break
-                    
-                image_size = struct.unpack('<L', size_bytes)[0]
-                print(f"Image size: {image_size}")
+            # Receive and process the image
+            frame = receive_image(conn)
+            if frame is None:
+                print("Failed to receive image.")
+                break
+
+            # Save the image
+            timestamp = time.strftime("%Y%m%d-%H%M%S")
+            image_path = os.path.join(output_text_dir, f"{mode_data}_{timestamp}.jpg")
+            cv2.imwrite(image_path, frame)
+            print(f"Image saved: {image_path}")
+
+            if mode_data == "CAPTURE":
+                # Apply OCR and save extracted text
+                text = apply_ocr(image_path)
+                text_file_path = os.path.join(output_text_dir, f"{mode_data}_{timestamp}.txt")
+                with open(text_file_path, "w") as f:
+                    f.write(text)
+                print(f"Extracted text saved: {text_file_path}")
+
+                # Convert text to speech and save .wav file
+                wav_file_path = os.path.join(output_audio_dir, f"{mode_data}_{timestamp}.wav")
+                text_to_speech(text, wav_file_path)
+                print(f"TTS saved: {wav_file_path}")
+
+                # Send the .wav file back to the Raspberry Pi
+                with open(wav_file_path, "rb") as f:
+                    audio_data = f.read()
                 
-                if image_size == 0:
-                    break
+                conn.sendall(struct.pack('<L', len(audio_data)))  # Send audio file size
+                conn.sendall(audio_data)  # Send audio file content
+                print("WAV file sent back to host.")
 
+            elif mode_data == "DESCRIBE":
+                pass  # Placeholder for future development
 
-                # Receive image data
-                image_data = b""
-                while len(image_data) < image_size:
-                    chunk = conn.recv(min(4096, image_size - len(image_data)))
-                    if not chunk:
-                        break
-                    image_data += chunk
+    except Exception as e:
+        print(f"Error: {e}")
 
-                # Process image
-                frame_data = np.frombuffer(image_data, dtype=np.uint8)
-                frame = cv2.imdecode(frame_data, cv2.IMREAD_COLOR)
-                
-                if frame is not None:
-                    if mode == "MODE-I":
-                        # Save image for OCR
-                        image_path = "/home/focus/temp_image.jpg"
-                        cv2.imwrite(image_path, frame)
-                        
-                        # Perform OCR
-                        text = apply_ocr(image_path)
-                        
-                        # Convert text to speech
-                        text_to_speech(text)
-                        
-                        # Send WAV file back
-                        with open("/home/focus/output.wav", "rb") as f:
-                            wav_data = f.read()
-                            conn.sendall(struct.pack('<L', len(wav_data)))
-                            conn.sendall(wav_data)
-                    
-                    elif mode == "MODE-II":
-                        # Future implementation for continuous video processing
-                        # This could include more advanced scene recognition, 
-                        # face detection, etc.
-                        pass
+    finally:
+        conn.close()
 
-        except Exception as e:
-            print(f"Error processing connection: {e}")
-        finally:
-            conn.close()
-
-if __name__ == "__main__":
-    main()

@@ -1,37 +1,30 @@
-import socket
+from flask import Flask, Response
 import cv2
-import struct
-import pickle
 
-# Raspberry Pi Server Configuration
-SERVER_IP = "192.168.157.52"  # Change this to your laptop's IP
-PORT = 8000
+app = Flask(__name__)
 
-# Initialize Pi Camera
+# Initialize Raspberry Pi Camera
 cap = cv2.VideoCapture(0)  # Use Pi Camera
 
-# Create a socket
-server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-server_socket.connect((SERVER_IP, PORT))
-
-print("Streaming video to client...")
-
-try:
+def generate_frames():
+    """Continuously capture frames and send them to the Flask server."""
     while True:
-        ret, frame = cap.read()
-        if not ret:
+        success, frame = cap.read()
+        if not success:
             break
+        
+        # Encode the frame in JPEG format
+        _, buffer = cv2.imencode('.jpg', frame)
+        frame_bytes = buffer.tobytes()
 
-        # Encode the frame
-        data = pickle.dumps(frame)
-        size = struct.pack("L", len(data))
+        # Yield frame as a multipart response
+        yield (b'--frame\r\n'
+               b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
 
-        # Send the size and data
-        server_socket.sendall(size + data)
+@app.route('/video_feed')
+def video_feed():
+    """Route to stream video feed."""
+    return Response(generate_frames(), mimetype='multipart/x-mixed-replace; boundary=frame')
 
-except Exception as e:
-    print(f"Error: {e}")
-
-finally:
-    cap.release()
-    server_socket.close()
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=5000, debug=True, threaded=True)

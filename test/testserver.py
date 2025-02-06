@@ -87,7 +87,28 @@ while True:
             cv2.imwrite(image_path, frame)
             print(f"Image saved: {image_path}")
 
-            if mode_data == "DESCRIBE":
+            if mode_data == "CAPTURE":
+                # Apply OCR and save extracted text
+                text = apply_ocr(image_path)
+                text_file_path = os.path.join(output_text_dir, f"{mode_data}_{timestamp}.txt")
+                with open(text_file_path, "w") as f:
+                    f.write(text)
+                print(f"Extracted text saved: {text_file_path}")
+
+                # Convert text to speech and save as .mp3 file
+                mp3_file_path = os.path.join(output_audio_dir, f"{mode_data}_{timestamp}.mp3")
+                text_to_speech(text, mp3_file_path)
+                print(f"TTS saved as MP3: {mp3_file_path}")
+
+                # Send the .mp3 file back to the Raspberry Pi
+                with open(mp3_file_path, "rb") as f:
+                    audio_data = f.read()
+                
+                conn.sendall(struct.pack('<L', len(audio_data)))  # Send audio file size
+                conn.sendall(audio_data)  # Send audio file content
+                print("MP3 file sent back to host.")
+
+            elif mode_data == "DESCRIBE":
                 labels = apply_google_vision(image_path)
                 scene_description = generate_scene_description(labels)
                 print(f"Scene Description: {scene_description}")

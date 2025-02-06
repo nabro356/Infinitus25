@@ -10,7 +10,7 @@ from googleapiclient.discovery import build
 
 # **Google Drive API Setup**
 SCOPES = ['https://www.googleapis.com/auth/drive']
-SERVICE_ACCOUNT_FILE = '/home/pizero/credentials.json'  # Replace with your service account JSON file
+SERVICE_ACCOUNT_FILE = '/home/pizero/southern-shade-450017-n1-51653cac7517.json'  # Replace with your service account JSON file
 drive_service = build('drive', 'v3', credentials=service_account.Credentials.from_service_account_file(SERVICE_ACCOUNT_FILE, scopes=SCOPES))
 
 # Google Drive Folder IDs (Replace with actual IDs)

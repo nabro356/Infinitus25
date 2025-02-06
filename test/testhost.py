@@ -3,24 +3,23 @@ import socket
 import struct
 import time
 import os
+import threading
 import RPi.GPIO as GPIO
 from picamera2 import Picamera2
 
 # GPIO Setup
-button_pin = 2  # Changed to GPIO pin 2
+button_pin = 2  # Using GPIO pin 2
 GPIO.setmode(GPIO.BCM)
 GPIO.setup(button_pin, GPIO.IN, pull_up_down=GPIO.PUD_UP)
 
 # Server Configuration
-server_ip = '192.168.157.52'  # Replace with your server's actual IP
+server_ip = '192.168.157.52'  # Replace with actual server IP
 server_port = 8000
-client_socket = socket.socket()
-client_socket.connect((server_ip, server_port))
-connection = client_socket.makefile('wb')
 
 # Mode Management
-current_mode = "CAPTURE"  # Default mode
-mode_names = ["CAPTURE", "DESCRIBE"]
+modes = ["CAPTURE", "DESCRIBE"]  # Mode-I and Mode-II
+current_mode_index = 0  # Start in Mode-I (CAPTURE)
+running = True  # Control flag for Mode-II automatic capture
 
 # Directories for saving images & output files
 image_dir = "/home/pizero/ProjectImages/"
@@ -30,32 +29,47 @@ output_dir = "/home/pizero/ProjectOutput/"
 os.makedirs(image_dir, exist_ok=True)
 os.makedirs(output_dir, exist_ok=True)
 
-def button_callback(channel):
-    """Toggle between CAPTURE and DESCRIBE modes"""
-    global current_mode
-    current_mode = "DESCRIBE" if current_mode == "CAPTURE" else "CAPTURE"
+# Initialize Picamera2
+picam2 = Picamera2()
+config = picam2.create_still_configuration(main={"size": (640, 480)})
+picam2.configure(config)
+picam2.start()
+time.sleep(2)  # Allow camera to warm up
+
+def toggle_mode(channel):
+    """Toggle between CAPTURE and DESCRIBE modes."""
+    global current_mode_index, running
+    current_mode_index = (current_mode_index + 1) % 2  # Toggle between 0 (CAPTURE) and 1 (DESCRIBE)
+    current_mode = modes[current_mode_index]
     print(f"Mode changed to: {current_mode}")
 
-GPIO.add_event_detect(button_pin, GPIO.FALLING, callback=button_callback, bouncetime=300)
+    if current_mode == "CAPTURE":
+        capture_and_send_image(current_mode)  # Capture immediately when switching to CAPTURE mode
+        running = False  # Stop automatic captures
+    else:
+        running = True
+        threading.Thread(target=auto_capture_describe, daemon=True).start()  # Start auto capture in DESCRIBE mode
 
-def receive_wav():
-    """Receive and save the .wav file from the server"""
+GPIO.add_event_detect(button_pin, GPIO.FALLING, callback=toggle_mode, bouncetime=300)
+
+def receive_mp3():
+    """Receive, save, and play the .mp3 file from the server."""
     try:
         size_data = client_socket.recv(4)
         
         if not size_data or len(size_data) < 4:
-            print("No valid WAV file size received.")
+            print("No valid MP3 file size received.")
             return
         
-        wav_size = struct.unpack('<L', size_data)[0]
+        mp3_size = struct.unpack('<L', size_data)[0]
         
-        if wav_size == 0:
-            print("No WAV file received")
+        if mp3_size == 0:
+            print("No MP3 file received")
             return
         
-        wav_path = os.path.join(output_dir, "output.wav")
-        with open(wav_path, "wb") as f:
-            remaining_size = wav_size
+        mp3_path = os.path.join(output_dir, "output.mp3")
+        with open(mp3_path, "wb") as f:
+            remaining_size = mp3_size
             while remaining_size > 0:
                 data = client_socket.recv(min(1024, remaining_size))
                 if not data:
@@ -63,22 +77,26 @@ def receive_wav():
                 f.write(data)
                 remaining_size -= len(data)
 
-        print(f"WAV file saved: {wav_path}")
+        print(f"MP3 file saved: {mp3_path}")
+
+        # Play the MP3 file using mpg321
+        os.system(f"mpg321 {mp3_path}")
 
     except Exception as e:
-        print(f"Error receiving WAV file: {e}")
+        print(f"Error receiving MP3 file: {e}")
 
-try:
-    picam2 = Picamera2()
-    config = picam2.create_still_configuration(main={"size": (640, 480)})
-    picam2.configure(config)
-    picam2.start()
-    time.sleep(2)  # Allow camera to warm up
+def capture_and_send_image(mode):
+    """Capture an image and send it to the server."""
+    global client_socket, connection
+    
+    try:
+        client_socket = socket.socket()
+        client_socket.connect((server_ip, server_port))
+        connection = client_socket.makefile('wb')
 
-    while True:
         # Generate unique filename for each image
         timestamp = time.strftime("%Y%m%d-%H%M%S")
-        image_path = os.path.join(image_dir, f"{current_mode}_{timestamp}.jpg")
+        image_path = os.path.join(image_dir, f"{mode}_{timestamp}.jpg")
 
         # Capture image and save locally
         picam2.capture_file(image_path)
@@ -89,7 +107,7 @@ try:
             image_data = f.read()
 
         # Send mode information (Ensure it's always 7 bytes for consistency)
-        mode_bytes = current_mode.ljust(7).encode('utf-8')  # Ensure it is always 7 bytes
+        mode_bytes = mode.ljust(7).encode('utf-8')
         connection.write(mode_bytes)
         connection.flush()
 
@@ -101,11 +119,28 @@ try:
         connection.write(image_data)
         connection.flush()
 
-        # Receive and save the WAV response
-        receive_wav()
+        # Receive and play the MP3 response
+        receive_mp3()
+
+    except Exception as e:
+        print(f"Error in capturing/sending image: {e}")
+
+    finally:
+        connection.write(struct.pack('<L', 0))  # Send termination signal
+        connection.close()
+        client_socket.close()
+
+def auto_capture_describe():
+    """Automatically captures and sends an image every 35 seconds in DESCRIBE mode."""
+    while running:
+        print("Auto-capturing image in DESCRIBE mode...")
+        capture_and_send_image("DESCRIBE")
+        time.sleep(35)
+
+try:
+    print("Waiting for button press...")
+    while True:
+        time.sleep(0.1)  # Keep the script running
 
 finally:
-    connection.write(struct.pack('<L', 0))  # Send termination signal
-    connection.close()
-    client_socket.close()
     GPIO.cleanup()

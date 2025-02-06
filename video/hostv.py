@@ -3,33 +3,42 @@ import socket
 import struct
 import time
 import os
-import threading
 import RPi.GPIO as GPIO
 from picamera2 import Picamera2
+from google.oauth2 import service_account
+from googleapiclient.discovery import build
 
-# GPIO Setup
-button_pin = 2  # Changed to GPIO pin 2
+# **Google Drive API Setup**
+SCOPES = ['https://www.googleapis.com/auth/drive']
+SERVICE_ACCOUNT_FILE = '/home/pizero/credentials.json'  # Replace with your service account JSON file
+drive_service = build('drive', 'v3', credentials=service_account.Credentials.from_service_account_file(SERVICE_ACCOUNT_FILE, scopes=SCOPES))
+
+# Google Drive Folder IDs (Replace with actual IDs)
+IMAGE_FOLDER_ID = "1IqwZ7rO690pPITRP5YTH1QWPh7Ip9VY2"
+MP3_FOLDER_ID = "1IqwZ7rO690pPITRP5YTH1QWPh7Ip9VY2"
+
+# **GPIO Setup**
+button_pin = 2
 GPIO.setmode(GPIO.BCM)
 GPIO.setup(button_pin, GPIO.IN, pull_up_down=GPIO.PUD_UP)
 
-# Server Configuration
-server_ip = '192.168.157.52'  # Replace with your server's actual IP
+# **Server Configuration**
+server_ip = '192.168.157.52'  
 server_port = 8000
 
-# Mode Management
-modes = ["CAPTURE", "DESCRIBE"]  # Mode-I and Mode-II
-current_mode_index = 0  # Start in Mode-I (CAPTURE)
-auto_capture_thread = None  # Background thread for Mode-II
+# **Mode Management**
+current_mode = "CAPTURE"
+mode_names = ["CAPTURE", "DESCRIBE"]
 
-# Directories for saving images & output files
+# **Directories for saving images & output files**
 image_dir = "/home/pizero/ProjectImages/"
 output_dir = "/home/pizero/ProjectOutput/"
 
-# Ensure directories exist
+# **Ensure directories exist**
 os.makedirs(image_dir, exist_ok=True)
 os.makedirs(output_dir, exist_ok=True)
 
-# Initialize Picamera2
+# **Initialize Picamera2**
 picam2 = Picamera2()
 config = picam2.create_still_configuration(main={"size": (640, 480)})
 picam2.configure(config)
@@ -38,28 +47,14 @@ time.sleep(2)  # Allow camera to warm up
 
 def toggle_mode(channel):
     """Toggle between CAPTURE and DESCRIBE modes"""
-    global current_mode_index, auto_capture_thread
-
-    # Switch mode
-    current_mode_index = (current_mode_index + 1) % 2  # 0 -> 1 -> 0 (CAPTURE -> DESCRIBE -> CAPTURE)
-    current_mode = modes[current_mode_index]
+    global current_mode
+    current_mode = "DESCRIBE" if current_mode == "CAPTURE" else "CAPTURE"
     print(f"Mode changed to: {current_mode}")
 
     if current_mode == "CAPTURE":
-        # Stop the background thread for auto-capturing in Mode-II
-        if auto_capture_thread and auto_capture_thread.is_alive():
-            auto_capture_thread_running.clear()
-            auto_capture_thread.join()
-            print("Auto capture thread stopped.")
-
-        capture_and_send_image(current_mode)  # Capture image only in CAPTURE mode
-
+        capture_and_send_image()
     elif current_mode == "DESCRIBE":
-        # Start auto-capture every 30 seconds in Mode-II
-        auto_capture_thread_running.set()
-        auto_capture_thread = threading.Thread(target=auto_capture_loop)
-        auto_capture_thread.start()
-        print("Auto capture thread started.")
+        upload_image_to_drive()
 
 GPIO.add_event_detect(button_pin, GPIO.FALLING, callback=toggle_mode, bouncetime=300)
 
@@ -96,7 +91,7 @@ def receive_mp3():
     except Exception as e:
         print(f"Error receiving MP3 file: {e}")
 
-def capture_and_send_image(mode):
+def capture_and_send_image():
     """Capture an image and send it to the server"""
     global client_socket, connection
     
@@ -107,7 +102,7 @@ def capture_and_send_image(mode):
 
         # Generate unique filename for each image
         timestamp = time.strftime("%Y%m%d-%H%M%S")
-        image_path = os.path.join(image_dir, f"{mode}_{timestamp}.jpg")
+        image_path = os.path.join(image_dir, f"{current_mode}_{timestamp}.jpg")
 
         # Capture image and save locally
         picam2.capture_file(image_path)
@@ -117,8 +112,8 @@ def capture_and_send_image(mode):
         with open(image_path, "rb") as f:
             image_data = f.read()
 
-        # Send mode information (Ensure it's always 7 bytes for consistency)
-        mode_bytes = mode.ljust(7).encode('utf-8')  # Ensure it is always 7 bytes
+        # Send mode information
+        mode_bytes = current_mode.ljust(7).encode('utf-8')
         connection.write(mode_bytes)
         connection.flush()
 
@@ -141,17 +136,52 @@ def capture_and_send_image(mode):
         connection.close()
         client_socket.close()
 
-def auto_capture_loop():
-    """Continuously capture and send an image every 30 seconds in Mode-II"""
-    while auto_capture_thread_running.is_set():
-        capture_and_send_image("DESCRIBE")
+def upload_image_to_drive():
+    """Upload an image every 30 seconds to Google Drive"""
+    while current_mode == "DESCRIBE":
+        timestamp = time.strftime("%Y%m%d-%H%M%S")
+        image_path = os.path.join(image_dir, f"DESCRIBE_{timestamp}.jpg")
+
+        # Capture and save the image
+        picam2.capture_file(image_path)
+        print(f"Image saved for upload: {image_path}")
+
+        # Upload to Google Drive
+        file_metadata = {'name': os.path.basename(image_path), 'parents': [IMAGE_FOLDER_ID]}
+        media = drive_service.files().create(body=file_metadata, media_body=image_path).execute()
+        print(f"Uploaded {image_path} to Google Drive.")
+
+        # Wait 30 seconds before next upload
         time.sleep(30)
 
-# Flag to control auto-capture in Mode-II
-auto_capture_thread_running = threading.Event()
+        # Fetch the latest MP3 file from Drive
+        fetch_latest_mp3_from_drive()
+
+def fetch_latest_mp3_from_drive():
+    """Fetch the latest MP3 file from Google Drive and play it"""
+    results = drive_service.files().list(q=f"'{MP3_FOLDER_ID}' in parents and mimeType='audio/mpeg'", 
+                                         orderBy="createdTime desc", pageSize=1).execute()
+    files = results.get('files', [])
+
+    if not files:
+        print("No MP3 file found in Google Drive.")
+        return
+
+    latest_mp3 = files[0]  # Get the most recent MP3 file
+    mp3_path = os.path.join(output_dir, latest_mp3['name'])
+    
+    # Download the latest MP3 file
+    request = drive_service.files().get_media(fileId=latest_mp3['id'])
+    with open(mp3_path, 'wb') as f:
+        f.write(request.execute())
+    
+    print(f"Downloaded latest MP3 file: {mp3_path}")
+
+    # Play the MP3 file
+    os.system(f"mpg321 {mp3_path}")
 
 try:
-    print("Waiting for button press...")
+    print("Waiting for button press to capture an image...")
     while True:
         time.sleep(0.1)  # Keep the script running
 

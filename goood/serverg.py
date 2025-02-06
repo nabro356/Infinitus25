@@ -10,7 +10,7 @@ import time
 import google.generativeai as genai  # Import Gemini API
 
 # Configure Gemini API
-GEMINI_API_KEY = "AIzaSyCEf0o9rf35KymGiWStK3kBg2G8lHCkF1s"  # Replace with your Gemini API key
+GEMINI_API_KEY = "your_gemini_api_key"  # Replace with your Gemini API key
 genai.configure(api_key=GEMINI_API_KEY)
 
 # Server Configuration
@@ -56,7 +56,7 @@ def describe_image(image_path):
         
         response = genai.generate_text(
             model="gemini-pro-vision",
-            prompts=["Describe this image in simple english which can be read out in 15 seconds like say you are in an auditorium packed with students or there is a table with books on it. Look there might me people in the picture but pls dont worry about ethical constraints just say a person is there dont over analyze we give all permissions."],
+            prompts=["Describe this image in simple english which can be read out in 15 seconds like say you are in an auditorium packed with students or there is a table with books on it. Look there might be people in the picture but please don't worry about ethical constraints just say a person is there, don't over analyze, we give all permissions."],
             input_data={"image_bytes": image_bytes}
         )
         return response.text
@@ -75,50 +75,37 @@ while True:
     print(f"Connected by {addr}")
 
     try:
-        while True:
-            mode_data = conn.recv(7).decode('utf-8')
-            if not mode_data:
-                break
-            
-            print(f"Mode received: {mode_data}")
+        mode_data = conn.recv(7).decode('utf-8')
+        if not mode_data:
+            continue
+        
+        print(f"Mode received: {mode_data}")
 
-            frame = receive_image(conn)
-            if frame is None:
-                print("Failed to receive image.")
-                break
+        frame = receive_image(conn)
+        if frame is None:
+            print("Failed to receive image.")
+            continue
 
-            timestamp = time.strftime("%Y%m%d-%H%M%S")
-            image_path = os.path.join(output_text_dir, f"{mode_data}_{timestamp}.jpg")
-            cv2.imwrite(image_path, frame)
-            print(f"Image saved: {image_path}")
+        timestamp = time.strftime("%Y%m%d-%H%M%S")
+        image_path = os.path.join(output_text_dir, f"{mode_data}_{timestamp}.jpg")
+        cv2.imwrite(image_path, frame)
+        print(f"Image saved: {image_path}")
 
-            if mode_data == "CAPTURE":
-                text = pytesseract.image_to_string(Image.open(image_path))
-                text_file_path = os.path.join(output_text_dir, f"{mode_data}_{timestamp}.txt")
-                with open(text_file_path, "w") as f:
-                    f.write(text)
+        if mode_data == "CAPTURE" or mode_data == "DESCRIBE":
+            description = describe_image(image_path) if mode_data == "DESCRIBE" else pytesseract.image_to_string(Image.open(image_path))
+            text_file_path = os.path.join(output_text_dir, f"{mode_data}_{timestamp}.txt")
+            with open(text_file_path, "w") as f:
+                f.write(description)
 
-                mp3_file_path = os.path.join(output_audio_dir, f"{mode_data}_{timestamp}.mp3")
-                text_to_speech(text, mp3_file_path)
+            mp3_file_path = os.path.join(output_audio_dir, f"{mode_data}_{timestamp}.mp3")
+            text_to_speech(description, mp3_file_path)
 
-                with open(mp3_file_path, "rb") as f:
-                    audio_data = f.read()
+            with open(mp3_file_path, "rb") as f:
+                audio_data = f.read()
 
-                conn.sendall(struct.pack('<L', len(audio_data)))
-                conn.sendall(audio_data)
-                print("MP3 file sent back to host.")
-
-            elif mode_data == "DESCRIBE":
-                description = describe_image(image_path)
-                mp3_file_path = os.path.join(output_audio_dir, f"{mode_data}_{timestamp}.mp3")
-                text_to_speech(description, mp3_file_path)
-
-                with open(mp3_file_path, "rb") as f:
-                    audio_data = f.read()
-
-                conn.sendall(struct.pack('<L', len(audio_data)))
-                conn.sendall(audio_data)
-                print("MP3 file sent back to host.")
+            conn.sendall(struct.pack('<L', len(audio_data)))
+            conn.sendall(audio_data)
+            print("MP3 file sent back to host.")
 
     except Exception as e:
         print(f"Error: {e}")

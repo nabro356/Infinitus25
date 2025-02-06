@@ -8,18 +8,18 @@ import RPi.GPIO as GPIO
 from picamera2 import Picamera2
 
 # GPIO Setup
-button_pin = 2  # Changed to GPIO pin 2
+button_pin = 2  # Using GPIO pin 2
 GPIO.setmode(GPIO.BCM)
 GPIO.setup(button_pin, GPIO.IN, pull_up_down=GPIO.PUD_UP)
 
 # Server Configuration
-server_ip = '192.168.157.52'  # Replace with your server's actual IP
+server_ip = '192.168.157.52'  # Replace with actual server IP
 server_port = 8000
 
 # Mode Management
 modes = ["CAPTURE", "DESCRIBE"]  # Mode-I and Mode-II
 current_mode_index = 0  # Start in Mode-I (CAPTURE)
-auto_capture_thread = None  # Background thread for Mode-II
+running = True  # Control flag for Mode-II automatic capture
 
 # Directories for saving images & output files
 image_dir = "/home/pizero/ProjectImages/"
@@ -37,34 +37,23 @@ picam2.start()
 time.sleep(2)  # Allow camera to warm up
 
 def toggle_mode(channel):
-    """Toggle between CAPTURE and DESCRIBE modes"""
-    global current_mode_index, auto_capture_thread
-
-    # Switch mode
-    current_mode_index = (current_mode_index + 1) % 2  # 0 -> 1 -> 0 (CAPTURE -> DESCRIBE -> CAPTURE)
+    """Toggle between CAPTURE and DESCRIBE modes."""
+    global current_mode_index, running
+    current_mode_index = (current_mode_index + 1) % 2  # Toggle between 0 (CAPTURE) and 1 (DESCRIBE)
     current_mode = modes[current_mode_index]
     print(f"Mode changed to: {current_mode}")
 
     if current_mode == "CAPTURE":
-        # Stop the background thread for auto-capturing in Mode-II
-        if auto_capture_thread and auto_capture_thread.is_alive():
-            auto_capture_thread_running.clear()
-            auto_capture_thread.join()
-            print("Auto capture thread stopped.")
-
-        capture_and_send_image(current_mode)  # Capture image only in CAPTURE mode
-
-    elif current_mode == "DESCRIBE":
-        # Start auto-capture every 30 seconds in Mode-II
-        auto_capture_thread_running.set()
-        auto_capture_thread = threading.Thread(target=auto_capture_loop)
-        auto_capture_thread.start()
-        print("Auto capture thread started.")
+        capture_and_send_image(current_mode)  # Capture immediately when switching to CAPTURE mode
+        running = False  # Stop automatic captures
+    else:
+        running = True
+        threading.Thread(target=auto_capture_describe, daemon=True).start()  # Start auto capture in DESCRIBE mode
 
 GPIO.add_event_detect(button_pin, GPIO.FALLING, callback=toggle_mode, bouncetime=300)
 
 def receive_mp3():
-    """Receive, save, and play the .mp3 file from the server"""
+    """Receive, save, and play the .mp3 file from the server."""
     try:
         size_data = client_socket.recv(4)
         
@@ -97,7 +86,7 @@ def receive_mp3():
         print(f"Error receiving MP3 file: {e}")
 
 def capture_and_send_image(mode):
-    """Capture an image and send it to the server"""
+    """Capture an image and send it to the server."""
     global client_socket, connection
     
     try:
@@ -118,7 +107,7 @@ def capture_and_send_image(mode):
             image_data = f.read()
 
         # Send mode information (Ensure it's always 7 bytes for consistency)
-        mode_bytes = mode.ljust(7).encode('utf-8')  # Ensure it is always 7 bytes
+        mode_bytes = mode.ljust(7).encode('utf-8')
         connection.write(mode_bytes)
         connection.flush()
 
@@ -141,14 +130,12 @@ def capture_and_send_image(mode):
         connection.close()
         client_socket.close()
 
-def auto_capture_loop():
-    """Continuously capture and send an image every 30 seconds in Mode-II"""
-    while auto_capture_thread_running.is_set():
+def auto_capture_describe():
+    """Automatically captures and sends an image every 35 seconds in DESCRIBE mode."""
+    while running:
+        print("Auto-capturing image in DESCRIBE mode...")
         capture_and_send_image("DESCRIBE")
-        time.sleep(30)
-
-# Flag to control auto-capture in Mode-II
-auto_capture_thread_running = threading.Event()
+        time.sleep(35)
 
 try:
     print("Waiting for button press...")

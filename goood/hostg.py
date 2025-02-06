@@ -19,7 +19,6 @@ server_port = 8000
 # Mode Management
 modes = ["CAPTURE", "DESCRIBE"]  # Mode-I and Mode-II
 current_mode_index = 0  # Start in CAPTURE mode
-running = False  # Control flag for DESCRIBE mode
 
 # Directories for saving images & output files
 image_dir = "/home/pizero/ProjectImages/"
@@ -38,18 +37,13 @@ time.sleep(2)  # Allow camera to warm up
 
 def toggle_mode(channel):
     """Toggle between CAPTURE and DESCRIBE modes"""
-    global current_mode_index, running
+    global current_mode_index
     
     current_mode_index = (current_mode_index + 1) % 2  # 0 -> 1 -> 0 (CAPTURE -> DESCRIBE -> CAPTURE)
     current_mode = modes[current_mode_index]
     print(f"Mode changed to: {current_mode}")
     
-    if current_mode == "CAPTURE":
-        running = False  # Stop DESCRIBE mode
-        capture_and_send_image(current_mode)
-    else:
-        running = True
-        threading.Thread(target=describe_mode_loop, daemon=True).start()
+    capture_and_send_image(current_mode)
 
 GPIO.add_event_detect(button_pin, GPIO.FALLING, callback=toggle_mode, bouncetime=300)
 
@@ -111,13 +105,6 @@ def capture_and_send_image(mode):
         connection.write(struct.pack('<L', 0))
         connection.close()
         client_socket.close()
-
-def describe_mode_loop():
-    """Continuously capture and send images every 30 seconds in DESCRIBE mode"""
-    global running
-    while running:
-        capture_and_send_image("DESCRIBE")
-        time.sleep(30)
 
 try:
     print("Waiting for button press...")
